@@ -13,8 +13,11 @@
       <span>Score: <strong id="score">0</strong></span>
       <button id="restartBtn" type="button">Restart</button>
     </div>
-    <canvas id="gameCanvas" width="400" height="400" aria-label="Snake game board"></canvas>
-    <p class="tip">Use Arrow Keys or WASD to move.</p>
+    <div class="board-wrap">
+      <canvas id="gameCanvas" width="400" height="400" aria-label="Snake game board"></canvas>
+      <button id="startBtn" class="start-btn" type="button">Start</button>
+    </div>
+    <p class="tip">Use Arrow Keys or WASD to move. Press Space to pause/resume.</p>
   </main>
   <script src="script.js"></script>
 </body>

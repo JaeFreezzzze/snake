@@ -2,6 +2,7 @@
 const ctx = canvas.getContext("2d");
 const scoreEl = document.getElementById("score");
 const restartBtn = document.getElementById("restartBtn");
+const startBtn = document.getElementById("startBtn");
 
 const gridSize = 20;
 const tileCount = canvas.width / gridSize;
@@ -12,8 +13,24 @@ let direction;
 let nextDirection;
 let food;
 let score;
-let gameTimer;
 let gameOver;
+let isPaused;
+let hasStarted;
+
+function refreshStartButton() {
+  if (gameOver) {
+    startBtn.textContent = "Start";
+    startBtn.classList.remove("hidden");
+    return;
+  }
+
+  if (isPaused) {
+    startBtn.textContent = hasStarted ? "Continue" : "Start";
+    startBtn.classList.remove("hidden");
+  } else {
+    startBtn.classList.add("hidden");
+  }
+}
 
 function resetGame() {
   snake = [{ x: 10, y: 10 }];
@@ -22,7 +39,10 @@ function resetGame() {
   food = createFood();
   score = 0;
   gameOver = false;
+  isPaused = true;
+  hasStarted = false;
   scoreEl.textContent = String(score);
+  refreshStartButton();
   draw();
 }
 
@@ -38,7 +58,7 @@ function createFood() {
 }
 
 function step() {
-  if (gameOver) return;
+  if (gameOver || isPaused) return;
 
   direction = nextDirection;
   const head = {
@@ -56,6 +76,8 @@ function step() {
 
   if (hitWall || hitBody) {
     gameOver = true;
+    isPaused = true;
+    refreshStartButton();
     draw();
     return;
   }
@@ -115,10 +137,17 @@ function drawGameOver() {
   ctx.fillText("Press Restart to play again", canvas.width / 2, canvas.height / 2 + 22);
 }
 
+function drawPauseOverlay() {
+  if (gameOver || !isPaused) return;
+  ctx.fillStyle = "rgba(0, 0, 0, 0.35)";
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+}
+
 function draw() {
   drawBoard();
   drawFood();
   drawSnake();
+  drawPauseOverlay();
   if (gameOver) {
     drawGameOver();
   }
@@ -129,8 +158,30 @@ function setDirection(x, y) {
   nextDirection = { x, y };
 }
 
+function togglePause() {
+  if (gameOver) return;
+
+  if (!hasStarted) {
+    hasStarted = true;
+    isPaused = false;
+  } else {
+    isPaused = !isPaused;
+  }
+
+  refreshStartButton();
+  draw();
+}
+
 document.addEventListener("keydown", (e) => {
-  switch (e.key.toLowerCase()) {
+  const key = e.key.toLowerCase();
+
+  if (key === " ") {
+    e.preventDefault();
+    togglePause();
+    return;
+  }
+
+  switch (key) {
     case "arrowup":
     case "w":
       setDirection(0, -1);
@@ -153,6 +204,7 @@ document.addEventListener("keydown", (e) => {
 });
 
 restartBtn.addEventListener("click", resetGame);
+startBtn.addEventListener("click", togglePause);
 
 resetGame();
-gameTimer = setInterval(step, tickMs);
+setInterval(step, tickMs);
