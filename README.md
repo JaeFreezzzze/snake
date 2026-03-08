@@ -10,6 +10,7 @@ This project is a simple web-based Snake game.
 
 ## Run
 
-1. Open `index.html` in your browser.
-2. Use Arrow Keys or WASD to control the snake.
-3. Click `Restart` after game over.
+1. Double-click `run.bat` for one-click launch.
+2. Or open `index.html` directly in your browser.
+3. Use Arrow Keys or WASD to control the snake.
+4. Click `Restart` after game over.
