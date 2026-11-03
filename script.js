@@ -11,6 +11,100 @@ let dashUntil = 0, dashReady = 0, mission = 0, missionMeals = 0;
 const missions = [3, 5, 7, 9];
 let best = 0;
 try { best = Number(localStorage.getItem('neon-snake-best')) || 0; } catch {}
+const META_KEY = 'neon-snake-meta-v1';
+const upgrades = [
+  {id:'insurance', name:'应急护盾', desc:'每次远征自带一枚护盾', max:1, cost:12},
+  {id:'reactor', name:'冲刺反应堆', desc:'每级缩短冲刺冷却 0.5 秒', max:4, cost:8},
+  {id:'scavenger', name:'晶核采集器', desc:'每级提升结算晶核 15%', max:4, cost:10}
+];
+const relics = [
+  {id:'greed',name:'贪婪协议',icon:'★',desc:'所有积分 +25%，移动速度 +8%',max:3},
+  {id:'engine',name:'脉冲引擎',icon:'ϟ',desc:'冲刺多持续 0.5 秒，冷却缩短 0.5 秒',max:3},
+  {id:'stasis',name:'时间琥珀',icon:'❄',desc:'移动减速 10%，限时物品延长 2 秒',max:3},
+  {id:'combo',name:'连锁回路',icon:'∞',desc:'连击窗口延长 1.5 秒，连击上限 +1',max:3},
+  {id:'prune',name:'蜕皮核心',icon:'⌁',desc:'立即缩短蛇身 3 格，此后每 5 次吞噬再蜕皮',max:1},
+  {id:'aegis',name:'守护之心',icon:'◈',desc:'立即获得护盾，此后每 5 次吞噬补充护盾',max:1},
+  {id:'fortune',name:'寻宝罗盘',icon:'✦',desc:'黄金每 2 次吞噬出现，黄金基础分 +50',max:1}
+];
+let meta = {version:1, cores:0, runs:0, upgrades:{}}, storageOK = true;
+try {
+  const saved = JSON.parse(localStorage.getItem(META_KEY));
+  if (saved && saved.version===1) {
+    for (const key of ['cores','runs']) if(Number.isSafeInteger(saved[key]) && saved[key]>=0) meta[key]=saved[key];
+    for (const u of upgrades) meta.upgrades[u.id]=Math.min(u.max,Math.max(0,Number.isSafeInteger(saved.upgrades?.[u.id])?saved.upgrades[u.id]:0));
+  }
+} catch { storageOK=false; }
+let runUpgrades = {...meta.upgrades};
+let build = {}, choices = [], settled = false, runReward = 0, basePrevious = 'ready', pendingDraft = false;
+const rank = id => build[id] || 0;
+function saveMeta() {
+  try { localStorage.setItem(META_KEY,JSON.stringify(meta)); storageOK=true; } catch { storageOK=false; }
+  updateMetaHUD();
+}
+function updateMetaHUD() {
+  $('wallet').textContent=meta.cores;
+  $('runBuild').textContent=Object.keys(build).length ? Object.entries(build).map(([id,n])=>relics.find(r=>r.id===id).name+' ×'+n).join(' · ') : '每 5 次吞噬，随机强化三选一。';
+  $('saveStatus').textContent=storageOK?'本机自动存档 · 已完成 '+meta.runs+' 次远征':'存储不可用：成长仅在本次页面内保留';
+}
+function bankRun(won=false) {
+  if(settled)return;
+  settled=true;
+  const base=eaten + mission*3 + Math.floor(score/100) + (won?25:0);
+  runReward=Math.floor(base*(1+.15*(runUpgrades.scavenger||0)));
+  meta.cores+=runReward;meta.runs++;saveMeta();
+}
+function shopPrice(u) { return u.cost*(1+(meta.upgrades[u.id]||0)); }
+function renderBase() {
+  $('rogueDescription').textContent=`可用晶核 ${meta.cores} · 永久强化在下一次远征生效。死亡、重开与切换难度均结算已获得奖励。`;
+  $('rogueCards').replaceChildren();
+  for(const u of upgrades){
+    const level=meta.upgrades[u.id]||0, button=document.createElement('button');
+    button.className='relic-card';button.disabled=level>=u.max||meta.cores<shopPrice(u);
+    const title=document.createElement('strong');title.textContent=u.name+` ${level}/${u.max}`;
+    const desc=document.createElement('span');desc.textContent=u.desc;
+    const price=document.createElement('small');price.textContent=level>=u.max?'已满级':`${shopPrice(u)} 晶核 · 购买`;
+    button.append(title,desc,price);button.onclick=()=>{
+      if((meta.upgrades[u.id]||0)>=u.max||meta.cores<shopPrice(u))return;
+      meta.cores-=shopPrice(u);meta.upgrades[u.id]=(meta.upgrades[u.id]||0)+1;saveMeta();renderBase();
+    };$('rogueCards').append(button);
+  }
+}
+function openBase(){
+  if(state==='draft'||state==='base')return;
+  basePrevious=state==='playing'?'paused':state;state='base';
+  $('rogueLabel').textContent='PERMANENT PROGRESSION';$('rogueTitle').textContent='成长基地';
+  $('closeRogue').hidden=false;renderBase();$('rogueDialog').showModal();updateAdventureHUD();
+}
+function closeBase(){
+  if(state!=='base')return;
+  $('rogueDialog').close();state=basePrevious;accumulator=0;updateOverlay();updateAdventureHUD();
+}
+function trimSnake(){if(snake.length>4)snake.splice(Math.max(4,snake.length-3));}
+function openDraft(){
+  const pool=relics.filter(r=>rank(r.id)<r.max);
+  if(!pool.length)return;
+  // Fisher-Yates keeps each eligible relic equally likely to appear.
+  for(let i=pool.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[pool[i],pool[j]]=[pool[j],pool[i]];}
+  choices=pool.slice(0,3);state='draft';accumulator=0;
+  $('rogueLabel').textContent='EVOLVE / CHOOSE ONE';$('rogueTitle').textContent='选择你的进化';
+  $('rogueDescription').textContent='本局生效，死亡重置。按 1 / 2 / 3 或点击选择，随后继续远征。';
+  $('closeRogue').hidden=true;$('rogueCards').replaceChildren();
+  choices.forEach((r,i)=>{
+    const button=document.createElement('button');button.className='relic-card';
+    const title=document.createElement('strong');title.textContent=`${i+1} · ${r.icon} ${r.name}`;
+    const desc=document.createElement('span');desc.textContent=r.desc;
+    const level=document.createElement('small');level.textContent=`等级 ${rank(r.id)+1} / ${r.max} · 仅本局`;
+    button.append(title,desc,level);button.onclick=()=>chooseRelic(i);$('rogueCards').append(button);
+  });$('rogueDialog').showModal();updateAdventureHUD();
+}
+function chooseRelic(i){
+  if(state!=='draft'||!choices[i])return;
+  const r=choices[i];build[r.id]=rank(r.id)+1;
+  if(r.id==='aegis')shield=true;
+  if(r.id==='prune')trimSnake();
+  choices=[];$('rogueDialog').close();state='playing';accumulator=0;
+  notify('进化完成 · '+r.name);updateHUD();updateMetaHUD();updateOverlay();
+}
 const stars = Array.from({ length: 45 }, () => ({ x: Math.random() * size, y: Math.random() * size, phase: Math.random() * 7 }));
 const pad = (n) => String(n).padStart(3, '0');
 function beep(freq, duration = .09, type = 'sine') {
@@ -39,7 +133,7 @@ function notify(message) {
   step.toastTimer = setTimeout(() => $('comboToast').classList.remove('show'), 1400);
 }
 function award(points) {
-  score += points;
+  score += Math.round(points*(1+.25*rank('greed')));
   if (score > best) {
     best = score;
     try { localStorage.setItem('neon-snake-best', String(best)); } catch {}
@@ -52,12 +146,12 @@ function spawnSpecial(type) {
       ![food, bonus, pickup].some(p => p && p.x === x && p.y === y)) candidates.push({x, y});
   }
   const spot = candidates[Math.floor(Math.random() * candidates.length)];
-  return spot ? {...spot, type, expires: playTime + (type === 'gold' ? 6500 : 10000)} : null;
+  return spot ? {...spot, type, expires: playTime + (type === 'gold' ? 6500 : 10000) + 2000*rank('stasis')} : null;
 }
 function activateDash() {
   if (state !== 'playing' || playTime < dashReady) return;
-  dashUntil = playTime + 1600;
-  dashReady = playTime + 6500;
+  dashUntil = playTime + 1600 + 500*rank('engine');
+  dashReady = playTime + Math.max(2500,6500-500*rank('engine')-500*(runUpgrades.reactor||0));
   burst((snake[0].x + .5) * tile, (snake[0].y + .5) * tile, '#4de3db');
   notify('ϟ 冲刺！得分翻倍'); beep(950, .18);
 }
@@ -77,6 +171,7 @@ function updateHUD() {
   $('progress').style.width = (eaten % 5) * 20 + '%'; $('progressLabel').textContent = `${eaten % 5} / 5`;
 }
 function updateOverlay() {
+  if(state==='draft'||state==='base')return;
   const active = state === 'playing';
   $('overlay').classList.toggle('hidden', active);
   $('pauseBtn').disabled = state === 'ready' || state === 'over' || state === 'won';
@@ -86,21 +181,27 @@ function updateOverlay() {
   const content = {
     ready: ['READY WHEN YOU ARE', '进入霓虹世界', '抢黄金、开冲刺、拿护盾。完成任务，突破纪录。', '开始游戏'],
     paused: ['TAKE A BREATHER', '时间为你暂停', '下一次突破，从这里继续。', '继续游戏'],
-    over: ['SIGNAL LOST / TRY AGAIN', '信号中断', `本局获得 ${score} 分 · 再来一次，超越自己。`, '再来一局'],
-    won: ['MISSION COMPLETE', '你征服了霓虹', `全屏制霸！最终得分 ${score}。`, '重新挑战']
+    over: ['SIGNAL LOST / TRY AGAIN', '信号中断', `本局 ${score} 分 · 晶核 +${runReward} · 基地升级后再战。`, '再来一局'],
+    won: ['MISSION COMPLETE', '你征服了霓虹', `全屏制霸！${score} 分 · 晶核 +${runReward}。`, '重新挑战']
   }[state];
   ['overlayLabel', 'overlayTitle', 'overlayCopy'].forEach((id, i) => $(id).textContent = content[i]);
   $('startBtn').innerHTML = content[3] + ' <span>↗</span>';
 }
 function resetGame() {
+  clearTimeout(step.toastTimer);
+  if(snake && !settled && (eaten>0||playTime>0))bankRun();
+  if($('rogueDialog').open)$('rogueDialog').close();
+  build={};choices=[];settled=false;runReward=0;pendingDraft=false;
   snake = [{x:10,y:12},{x:9,y:12},{x:8,y:12},{x:7,y:12}];
   direction = {x:1,y:0}; queue = []; score = 0; eaten = 0; combo = 1; lastMeal = -Infinity;
   particles = []; ripples = []; shake = 0; accumulator = 0; state = 'ready'; food = createFood();
-  playTime = 0; bonus = null; pickup = null; shield = false; slowUntil = 0; dashUntil = 0; dashReady = 0; mission = 0; missionMeals = 0; updateAdventureHUD();
-  $('comboToast').classList.remove('show'); updateHUD(); updateOverlay();
+  playTime = 0; bonus = null; pickup = null; shield = !!meta.upgrades.insurance; slowUntil = 0; dashUntil = 0; dashReady = 0; mission = 0; missionMeals = 0; updateAdventureHUD();
+  $('comboToast').classList.remove('show'); updateHUD(); updateOverlay(); updateMetaHUD();
 }
 function startOrPause() {
+  if(state==='draft'||state==='base')return;
   if (state === 'over' || state === 'won') resetGame();
+  if(state==='ready'){runUpgrades={...meta.upgrades};shield=!!runUpgrades.insurance;}
   state = state === 'playing' ? 'paused' : 'playing'; accumulator = 0;
   if (state === 'playing') beep(440);
   updateOverlay();
@@ -114,6 +215,8 @@ function burst(x, y, color, count = 32) {
   ripples.push({x,y,r:8,life:1,color});
 }
 function finish(won = false) {
+  if(state==='over'||state==='won')return;
+  bankRun(won);
   state = won ? 'won' : 'over';
   burst((snake[0].x+.5)*tile,(snake[0].y+.5)*tile,won ? '#c1ff65' : '#ff6caa',70);
   shake = reducedMotion ? 0 : 12; beep(won ? 880 : 130,.35,'sawtooth'); updateOverlay();
@@ -136,22 +239,23 @@ function step() {
   }
   snake.unshift(head);
   if (eating) {
-    const now = playTime; combo = now-lastMeal<3200 ? Math.min(combo+1,5) : 1; lastMeal=now;
+    const now = playTime; combo = now-lastMeal<3200+1500*rank('combo') ? Math.min(combo+1,5+rank('combo')) : 1; lastMeal=now;
     award(10*combo*(dashUntil>playTime?2:1)); eaten++; missionMeals++;
     burst((head.x+.5)*tile,(head.y+.5)*tile,'#ff8cbb',40); shake = reducedMotion ? 0 : 4;
     beep(500+combo*120,.14,'triangle');
     notify(combo > 1 ? `COMBO ×${combo} / +${10*combo*(dashUntil>playTime?2:1)}` : '+10 ENERGY');
-    if (eaten % 3 === 0) bonus = spawnSpecial('gold');
+    if (eaten % (rank('fortune')?2:3) === 0) bonus = spawnSpecial('gold');
     if (eaten % 4 === 0) pickup = spawnSpecial(Math.random() < .5 ? 'shield' : 'slow');
     const target = missions[Math.min(mission, missions.length - 1)];
     if (missionMeals >= target) {
       award(100 + mission * 50); mission++; missionMeals = 0; shield = true;
       notify('任务完成！奖励积分 + 护盾'); burst(360,360,'#c1ff65',80); beep(1200,.3);
     }
+    if(eaten%5===0){if(rank('prune'))trimSnake();if(rank('aegis'))shield=true;pendingDraft=true;}
     food=createFood(); updateHUD(); if (!food) finish(true);
   } else snake.pop();
   if (bonus && head.x === bonus.x && head.y === bonus.y) {
-    award(75*(dashUntil>playTime?2:1)); bonus=null;
+    award((75+50*rank('fortune'))*(dashUntil>playTime?2:1)); bonus=null;
     burst((head.x+.5)*tile,(head.y+.5)*tile,'#ffd56a',65);notify('★ 黄金能量！奖励 +75');beep(1500,.2);
   }
   if (pickup && head.x === pickup.x && head.y === pickup.y) {
@@ -160,6 +264,7 @@ function step() {
     burst((head.x+.5)*tile,(head.y+.5)*tile,'#69d9ff',45);pickup=null;beep(750,.2);
   }
   updateHUD(); updateAdventureHUD();
+  if(pendingDraft&&state==='playing'){pendingDraft=false;openDraft();}
 }
 function setDirection(x,y) {
   if (state !== 'playing' || queue.length>=2) return;
@@ -189,7 +294,7 @@ function draw(time,dt) {
     ctx.font='bold 25px monospace';ctx.textAlign='center';ctx.textBaseline='middle';
     ctx.fillText(item.type==='gold'?'★':item.type==='shield'?'◈':'❄',x,y);
     ctx.strokeStyle=color;ctx.lineWidth=2;ctx.beginPath();
-    ctx.arc(x,y,22,-Math.PI/2,-Math.PI/2+Math.PI*2*Math.max(0,(item.expires-playTime)/(item.type==='gold'?6500:10000)));ctx.stroke();ctx.restore();
+    ctx.arc(x,y,22,-Math.PI/2,-Math.PI/2+Math.PI*2*Math.min(1,Math.max(0,(item.expires-playTime)/(item.type==='gold'?6500:10000))));ctx.stroke();ctx.restore();
   }
   if (shield || dashUntil>playTime) {
     ctx.strokeStyle=shield?'#69d9ff':'#c1ff65';ctx.shadowColor=ctx.strokeStyle;ctx.shadowBlur=20;ctx.lineWidth=3;
@@ -210,20 +315,25 @@ function frame(time) {
     playTime+=dt;
     if(bonus&&bonus.expires<=playTime)bonus=null;
     if(pickup&&pickup.expires<=playTime)pickup=null;
-    if(combo>1&&playTime-lastMeal>=3200){combo=1;updateHUD();}
+    if(combo>1&&playTime-lastMeal>=3200+1500*rank('combo')){combo=1;updateHUD();}
     updateAdventureHUD();
-    accumulator+=dt;const tick=Math.max(32,(presets[mode]-Math.floor(eaten/5)*7)*(dashUntil>playTime?.55:1)*(slowUntil>playTime?1.6:1));while(accumulator>=tick&&state==='playing'){step();accumulator-=tick;}}
+    accumulator+=dt;const tick=Math.max(32,(presets[mode]-Math.floor(eaten/5)*7)*Math.pow(.92,rank('greed'))*Math.pow(1.1,rank('stasis'))*(dashUntil>playTime?.55:1)*(slowUntil>playTime?1.6:1));while(accumulator>=tick&&state==='playing'){step();accumulator-=tick;}}
   draw(time,dt);requestAnimationFrame(frame);
 }
 const directions={arrowup:[0,-1],w:[0,-1],arrowdown:[0,1],s:[0,1],arrowleft:[-1,0],a:[-1,0],arrowright:[1,0],d:[1,0]};
 document.addEventListener('keydown',e=>{
   if(e.target.closest('button,a,input,select,textarea')&&(e.key==='Enter'||e.key===' '))return;
   const key=e.key.toLowerCase();
+  if(state==='draft'){if(['1','2','3'].includes(key)){e.preventDefault();chooseRelic(Number(key)-1);}return;}
+  if(state==='base')return;
   if(directions[key]){e.preventDefault();setDirection(...directions[key]);}
   if((key===' '||key==='enter')&&!e.repeat){e.preventDefault();startOrPause();}
   if(key==='shift'&&!e.repeat){e.preventDefault();activateDash();}
   if(key==='r'&&!e.repeat)resetGame();
 });
+$('baseBtn').onclick=openBase;
+$('closeRogue').onclick=closeBase;
+$('rogueDialog').addEventListener('cancel',e=>{e.preventDefault();if(state==='base')closeBase();});
 $('dashBtn').onclick=()=>{activateDash();$('dashBtn').blur();};
 $('startBtn').onclick=()=>{startOrPause();$('startBtn').blur();};
 $('pauseBtn').onclick=()=>{startOrPause();$('pauseBtn').blur();};

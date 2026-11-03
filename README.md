@@ -30,3 +30,15 @@ Features include a glowing canvas arena, animated energy, particle bursts, shock
 - A shield absorbs one collision: a wall hit wraps you to the opposite edge; a body hit sheds the tail.
 - Complete the displayed pickup mission for bonus points and a shield; subsequent missions require more food.
 - All gameplay timers, including combos and power-ups, freeze while paused. Changing difficulty or restarting resets the challenge.
+
+## Roguelite progression
+
+Every 5 normal pickups pauses the run for a random, distinct three-choice relic draft. Click a card or press **1 / 2 / 3**. Relics reset each run; stacks are capped and fully upgraded relics leave the pool. Seven relics support greed (points with faster movement), dash, slow-time, combos, shedding, shields, and treasure builds. If all relics are maxed, the run continues without a draft.
+
+Open **成长基地** to buy permanent starting shield, dash cooldown reductions, or crystal income upgrades. Opening the base pauses a live run; purchases apply on the next run. Crystal payout is `floor((food + completed missions × 3 + floor(score / 100) + victory bonus 25) × (1 + collector level × 15%))`. Death, victory, reset, and difficulty changes settle a run once. Abandoning by refreshing or closing the page does not settle an unfinished run.
+
+Wallet, permanent upgrades, and completed run count save to this browser's local storage (`neon-snake-meta-v1`). Existing high scores remain intact. No account or cloud sync is required; clearing browser data clears progression. When storage is unavailable, a visible notice explains that progression only lasts for the current page.
+
+### Browser regression check
+
+With Python Playwright and Chromium installed, run `python3 tests/roguelite_smoke.py`. The check serves the checkout on an automatically chosen local port and uses an isolated browser profile.
