@@ -1,24 +1,19 @@
-﻿<!doctype html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Simple Snake Game</title>
-  <link rel="stylesheet" href="style.css" />
-</head>
+<!doctype html>
+<html lang="zh-CN">
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="theme-color" content="#080b13"><title>NEON / SNAKE — 霓虹贪吃蛇</title><link rel="stylesheet" href="style.css"></head>
 <body>
-  <main class="app">
-    <h1>Snake Game</h1>
-    <div class="hud">
-      <span>Score: <strong id="score">0</strong></span>
-      <button id="restartBtn" type="button">Restart</button>
-    </div>
-    <div class="board-wrap">
-      <canvas id="gameCanvas" width="400" height="400" aria-label="Snake game board"></canvas>
-      <button id="startBtn" class="start-btn" type="button">Start</button>
-    </div>
-    <p class="tip">Use Arrow Keys or WASD to move. Press Space to pause/resume.</p>
-  </main>
-  <script src="script.js"></script>
-</body>
-</html>
+<div class="ambient ambient-one"></div><div class="ambient ambient-two"></div>
+<main class="app">
+<header><a class="brand" href="./" aria-label="Neon Snake 首页"><span class="brand-mark">ϟ</span> ARCADE<span class="brand-light">/ LAB</span></a><div class="online"><i></i> SYSTEM ONLINE <span>01</span></div></header>
+<section class="title-row"><div><div class="eyebrow">THE CLASSIC. SUPERCHARGED.</div><h1>NEON<span>/</span>SNAKE<span class="title-dot">.</span></h1><p>潜入霓虹。吞噬能量。突破极限。</p></div><div class="edition">EST. 1976<br><strong>REBUILT FOR NOW ↗</strong></div></section>
+<div class="game-layout">
+<section class="arena-shell" aria-label="游戏区域"><div class="arena-top"><span><i></i> LIVE PLAYGROUND</span><span id="arenaStatus">AWAITING PLAYER</span></div><div class="board-wrap"><canvas id="gameCanvas" width="720" height="720" aria-label="霓虹贪吃蛇游戏棋盘"></canvas><div class="board-vignette"></div><div class="overlay" id="overlay"><div class="overlay-icon">ϟ</div><div class="eyebrow" id="overlayLabel">READY WHEN YOU ARE</div><h2 id="overlayTitle">进入霓虹世界</h2><p id="overlayCopy">每一次转向，都是新的可能。</p><button class="primary" id="startBtn">开始游戏 <span>↗</span></button><small>按 ENTER 开始 · SPACE 暂停</small></div><div id="comboToast" class="combo-toast" aria-live="polite"></div></div><div class="arena-bottom"><span><i></i> <span id="modeLabel">CLASSIC MODE</span></span><span>24 × 24 <b> / </b> NO LIMITS</span></div></section>
+<aside><section class="score-panel"><div class="panel-label">YOUR SCORE <span>↗</span></div><div id="score" class="score" aria-live="polite">000</div><div class="best-row"><span>♛ 最高纪录</span><strong id="best">000</strong></div><div class="divider"></div><div class="stats-row"><div><span>LEVEL</span><strong id="level">01</strong></div><div><span>LENGTH</span><strong id="length">04</strong></div><div><span>COMBO</span><strong id="combo">×1</strong></div></div><div class="energy-track"><div id="progress"></div></div><div class="progress-label"><span>下一等级</span><span id="progressLabel">0 / 5</span></div></section>
+<section class="settings-panel"><div class="panel-label">CHOOSE YOUR PACE</div><div class="modes" role="group" aria-label="游戏难度"><button data-mode="chill">悠闲</button><button data-mode="classic" class="active" aria-pressed="true">经典</button><button data-mode="hyper">极速</button></div><p id="modeDescription">恰到好处的速度，找回街机的心跳。</p><div class="utility-row"><button id="pauseBtn" disabled>Ⅱ 暂停</button><button id="restartBtn">↻ 重开</button><button id="soundBtn" aria-pressed="false" aria-label="开启音效">♪ OFF</button></div></section>
+<section class="controls-panel"><div class="panel-label">HOW TO PLAY</div><div class="control-line"><div class="key-group"><kbd>↑</kbd><div><kbd>←</kbd><kbd>↓</kbd><kbd>→</kbd></div></div><span>方向键 / WASD <small>掌控你的方向</small></span></div><div class="control-line"><kbd class="space-key">SPACE</kbd><span>暂停 / 继续 <small>喘口气，再出发</small></span></div><div class="food-guide"><span class="food-dot"></span><span>吞噬能量 <b>+10</b></span><span class="spark">✧</span></div></section>
+<div class="side-note"><span>✦</span> STAY HUNGRY. STAY ELECTRIC.</div></aside>
+</div>
+<div class="touch-controls" aria-label="触屏方向控制"><button data-dir="up" aria-label="向上">↑</button><div><button data-dir="left" aria-label="向左">←</button><button data-dir="down" aria-label="向下">↓</button><button data-dir="right" aria-label="向右">→</button></div></div>
+<footer><span>A LITTLE NOSTALGIA. A LOT OF NEON.</span><span>无尽挑战 <i>✦</i> 再来一局</span></footer>
+</main><script src="script.js"></script>
+</body></html>
