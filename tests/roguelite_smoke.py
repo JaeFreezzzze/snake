@@ -12,12 +12,13 @@ with sync_playwright() as p:
  b=p.chromium.launch(executable_path='/usr/bin/chromium',args=['--no-sandbox'])
  page=b.new_page();errors=[];page.on('pageerror',lambda e:errors.append(str(e)))
  page.goto(f'http://127.0.0.1:{server.server_port}');page.locator('#startBtn').click()
- for i in range(5):
+ for i in range(4):
   page.evaluate("state='playing';food={x:snake[0].x+1,y:snake[0].y};step();if(state==='playing')state='paused'")
  assert page.evaluate("state==='draft' && choices.length===3 && new Set(choices.map(r=>r.id)).size===3")
  t=page.evaluate('playTime');page.wait_for_timeout(180);assert page.evaluate('playTime')==t
  page.keyboard.press('Escape');assert page.locator('#rogueDialog').is_visible()
  selected=page.evaluate('choices[0].id');page.keyboard.press('1');assert page.evaluate('Object.keys(build).length===1')
+ assert page.evaluate("state==='route'");page.keyboard.press('1')
  page.evaluate("state='paused'")
  page.locator('#baseBtn').click();assert page.evaluate("state==='base'")
  page.keyboard.press('Escape');assert page.evaluate("state==='paused'")

@@ -23,7 +23,9 @@ const relics = [
   {id:'stasis',name:'时间琥珀',icon:'❄',desc:'移动减速 10%，限时物品延长 2 秒',max:3},
   {id:'combo',name:'连锁回路',icon:'∞',desc:'连击窗口延长 1.5 秒，连击上限 +1',max:3},
   {id:'prune',name:'蜕皮核心',icon:'⌁',desc:'立即缩短蛇身 3 格，此后每 5 次吞噬再蜕皮',max:1},
-  {id:'aegis',name:'守护之心',icon:'◈',desc:'立即获得护盾，此后每 5 次吞噬补充护盾',max:1},
+  {id:'aegis',name:'守护之心',icon:'◈',desc:'立即获得护盾，此后每 8 次吞噬补充护盾',max:1},
+  {id:'colossus',name:'巨蛇之誓',icon:'Ω',desc:'每多于 4 格的蛇身增加 4% 积分（上限 +100%）',max:2},
+  {id:'afterburn',name:'余烬回收',icon:'↯',desc:'冲刺吞噬能量返还 1 秒冷却（每级）',max:2},
   {id:'fortune',name:'寻宝罗盘',icon:'✦',desc:'黄金每 2 次吞噬出现，黄金基础分 +50',max:1}
 ];
 let meta = {version:1, cores:0, runs:0, upgrades:{}}, storageOK = true;
@@ -35,7 +37,7 @@ try {
   }
 } catch { storageOK=false; }
 let runUpgrades = {...meta.upgrades};
-let build = {}, choices = [], settled = false, runReward = 0, basePrevious = 'ready', pendingDraft = false;
+let build = {}, choices = [], settled = false, runReward = 0, basePrevious = 'ready';
 const rank = id => build[id] || 0;
 function saveMeta() {
   try { localStorage.setItem(META_KEY,JSON.stringify(meta)); storageOK=true; } catch { storageOK=false; }
@@ -43,14 +45,15 @@ function saveMeta() {
 }
 function updateMetaHUD() {
   $('wallet').textContent=meta.cores;
-  $('runBuild').textContent=Object.keys(build).length ? Object.entries(build).map(([id,n])=>relics.find(r=>r.id===id).name+' ×'+n).join(' · ') : '每 5 次吞噬，随机强化三选一。';
+  $('runBuild').textContent=Object.keys(build).length ? Object.entries(build).map(([id,n])=>relics.find(r=>r.id===id).name+' ×'+n).join(' · ') : '每阶段结束强化三选一，再选择风险路线。';
   $('saveStatus').textContent=storageOK?'本机自动存档 · 已完成 '+meta.runs+' 次远征':'存储不可用：成长仅在本次页面内保留';
 }
 function bankRun(won=false) {
   if(settled)return;
   settled=true;
-  const base=eaten + mission*3 + Math.floor(score/100) + (won?25:0);
-  runReward=Math.floor(base*(1+.15*(runUpgrades.scavenger||0)));
+  const base=Math.floor(eaten/2) + completedSectors*4 + routeCores + (won?20:0);
+  const difficulty={chill:1,classic:1.25,hyper:1.5}[mode];
+  runReward=Math.floor(base*difficulty*(1+.15*(runUpgrades.scavenger||0)));
   meta.cores+=runReward;meta.runs++;saveMeta();
 }
 function shopPrice(u) { return u.cost*(1+(meta.upgrades[u.id]||0)); }
@@ -70,7 +73,7 @@ function renderBase() {
   }
 }
 function openBase(){
-  if(state==='draft'||state==='base')return;
+  if(['draft','base','route'].includes(state))return;
   basePrevious=state==='playing'?'paused':state;state='base';
   $('rogueLabel').textContent='PERMANENT PROGRESSION';$('rogueTitle').textContent='成长基地';
   $('closeRogue').hidden=false;renderBase();$('rogueDialog').showModal();updateAdventureHUD();
@@ -86,7 +89,7 @@ function openDraft(){
   // Fisher-Yates keeps each eligible relic equally likely to appear.
   for(let i=pool.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[pool[i],pool[j]]=[pool[j],pool[i]];}
   choices=pool.slice(0,3);state='draft';accumulator=0;
-  $('rogueLabel').textContent='EVOLVE / CHOOSE ONE';$('rogueTitle').textContent='选择你的进化';
+  $('rogueLabel').textContent='EVOLVE / CHOOSE ONE';$('rogueTitle').textContent='阶段完成 · 选择进化';
   $('rogueDescription').textContent='本局生效，死亡重置。按 1 / 2 / 3 或点击选择，随后继续远征。';
   $('closeRogue').hidden=true;$('rogueCards').replaceChildren();
   choices.forEach((r,i)=>{
@@ -104,6 +107,7 @@ function chooseRelic(i){
   if(r.id==='prune')trimSnake();
   choices=[];$('rogueDialog').close();state='playing';accumulator=0;
   notify('进化完成 · '+r.name);updateHUD();updateMetaHUD();updateOverlay();
+  if(transitioning)openRoutes();
 }
 const stars = Array.from({ length: 45 }, () => ({ x: Math.random() * size, y: Math.random() * size, phase: Math.random() * 7 }));
 const pad = (n) => String(n).padStart(3, '0');
@@ -133,7 +137,7 @@ function notify(message) {
   step.toastTimer = setTimeout(() => $('comboToast').classList.remove('show'), 1400);
 }
 function award(points) {
-  score += Math.round(points*(1+.25*rank('greed')));
+  score += Math.round(points*(1+.25*rank('greed'))*(1+Math.min(1,Math.max(0,snake.length-4)*.04*rank('colossus'))));
   if (score > best) {
     best = score;
     try { localStorage.setItem('neon-snake-best', String(best)); } catch {}
@@ -156,12 +160,15 @@ function activateDash() {
   notify('ϟ 冲刺！得分翻倍'); beep(950, .18);
 }
 function updateAdventureHUD() {
+  updateExpeditionHUD();
   const target = missions[Math.min(mission, missions.length - 1)];
   $('missionText').textContent = `任务 ${mission + 1} · 吞噬 ${target} 个能量`;
   $('missionCount').textContent = `${missionMeals} / ${target}`;
   $('effectStatus').textContent = shield ? '◈ 护盾已就绪 · 抵挡一次碰撞' : slowUntil > playTime ? `❄ 时间减速 ${Math.ceil((slowUntil - playTime) / 1000)}s` : bonus ? `★ 黄金能量 ${Math.ceil((bonus.expires - playTime) / 1000)}s` : '每 3 次吞噬，触发限时黄金能量';
   const cooldown = Math.max(0, Math.ceil((dashReady - playTime) / 1000));
   $('dashBtn').disabled = state !== 'playing' || cooldown > 0;
+  $('mobileDash').disabled=$('dashBtn').disabled;
+  $('mobileDash').textContent=cooldown?`ϟ ${cooldown}s`:'ϟ 冲刺';
   $('dashBtn').textContent = dashUntil > playTime ? 'ϟ 冲刺中 · 双倍得分' : cooldown ? `ϟ 冲刺充能 ${cooldown}s` : 'ϟ 冲刺 / SHIFT';
 }
 function updateHUD() {
@@ -171,7 +178,7 @@ function updateHUD() {
   $('progress').style.width = (eaten % 5) * 20 + '%'; $('progressLabel').textContent = `${eaten % 5} / 5`;
 }
 function updateOverlay() {
-  if(state==='draft'||state==='base')return;
+  if(['draft','base','route'].includes(state))return;
   const active = state === 'playing';
   $('overlay').classList.toggle('hidden', active);
   $('pauseBtn').disabled = state === 'ready' || state === 'over' || state === 'won';
@@ -179,10 +186,10 @@ function updateOverlay() {
   $('arenaStatus').textContent = ({ ready: 'AWAITING PLAYER', playing: 'SIGNAL ACTIVE', paused: 'SIGNAL PAUSED', over: 'SIGNAL LOST', won: 'MISSION COMPLETE' })[state];
   if (active) return;
   const content = {
-    ready: ['READY WHEN YOU ARE', '进入霓虹世界', '抢黄金、开冲刺、拿护盾。完成任务，突破纪录。', '开始游戏'],
+    ready: ['READY WHEN YOU ARE', '进入霓虹世界', '五次强化，五次航道抉择，最终生存 25 秒。', '开始游戏'],
     paused: ['TAKE A BREATHER', '时间为你暂停', '下一次突破，从这里继续。', '继续游戏'],
     over: ['SIGNAL LOST / TRY AGAIN', '信号中断', `本局 ${score} 分 · 晶核 +${runReward} · 基地升级后再战。`, '再来一局'],
-    won: ['MISSION COMPLETE', '你征服了霓虹', `全屏制霸！${score} 分 · 晶核 +${runReward}。`, '重新挑战']
+    won: ['MISSION COMPLETE', '你征服了霓虹', `六阶段远征完成！${score} 分 · 晶核 +${runReward}。`, '重新挑战']
   }[state];
   ['overlayLabel', 'overlayTitle', 'overlayCopy'].forEach((id, i) => $(id).textContent = content[i]);
   $('startBtn').innerHTML = content[3] + ' <span>↗</span>';
@@ -191,7 +198,8 @@ function resetGame() {
   clearTimeout(step.toastTimer);
   if(snake && !settled && (eaten>0||playTime>0))bankRun();
   if($('rogueDialog').open)$('rogueDialog').close();
-  build={};choices=[];settled=false;runReward=0;pendingDraft=false;
+  resetExpedition();
+  build={};choices=[];settled=false;runReward=0;
   snake = [{x:10,y:12},{x:9,y:12},{x:8,y:12},{x:7,y:12}];
   direction = {x:1,y:0}; queue = []; score = 0; eaten = 0; combo = 1; lastMeal = -Infinity;
   particles = []; ripples = []; shake = 0; accumulator = 0; state = 'ready'; food = createFood();
@@ -199,7 +207,7 @@ function resetGame() {
   $('comboToast').classList.remove('show'); updateHUD(); updateOverlay(); updateMetaHUD();
 }
 function startOrPause() {
-  if(state==='draft'||state==='base')return;
+  if(['draft','base','route'].includes(state))return;
   if (state === 'over' || state === 'won') resetGame();
   if(state==='ready'){runUpgrades={...meta.upgrades};shield=!!runUpgrades.insurance;}
   state = state === 'playing' ? 'paused' : 'playing'; accumulator = 0;
@@ -230,6 +238,10 @@ function step() {
     head = {x:(head.x+cells)%cells,y:(head.y+cells)%cells}; shield=false;
     notify('◈ 护盾破裂 · 穿墙脱险'); beep(280,.2);
   }
+  if(pulseHits(head)){
+    if(!shield){finish();return;}
+    shield=false;pulse=null;notify('◈ 护盾抵挡脉冲');
+  }
   const eating = food && head.x===food.x && head.y===food.y;
   const body = eating ? snake : snake.slice(0,-1);
   if (head.x<0 || head.y<0 || head.x>=cells || head.y>=cells) { finish(); return; }
@@ -240,7 +252,8 @@ function step() {
   snake.unshift(head);
   if (eating) {
     const now = playTime; combo = now-lastMeal<3200+1500*rank('combo') ? Math.min(combo+1,5+rank('combo')) : 1; lastMeal=now;
-    award(10*combo*(dashUntil>playTime?2:1)); eaten++; missionMeals++;
+    award(10*combo*(dashUntil>playTime?2:1)); eaten++; missionMeals++;sectorMeals++;
+    if(dashUntil>playTime)dashReady=Math.max(playTime,dashReady-1000*rank('afterburn'));
     burst((head.x+.5)*tile,(head.y+.5)*tile,'#ff8cbb',40); shake = reducedMotion ? 0 : 4;
     beep(500+combo*120,.14,'triangle');
     notify(combo > 1 ? `COMBO ×${combo} / +${10*combo*(dashUntil>playTime?2:1)}` : '+10 ENERGY');
@@ -248,14 +261,15 @@ function step() {
     if (eaten % 4 === 0) pickup = spawnSpecial(Math.random() < .5 ? 'shield' : 'slow');
     const target = missions[Math.min(mission, missions.length - 1)];
     if (missionMeals >= target) {
-      award(100 + mission * 50); mission++; missionMeals = 0; shield = true;
-      notify('任务完成！奖励积分 + 护盾'); burst(360,360,'#c1ff65',80); beep(1200,.3);
+      award(100 + mission * 50); mission++; missionMeals = 0;
+      notify('任务完成！获得额外积分'); burst(360,360,'#c1ff65',80); beep(1200,.3);
     }
-    if(eaten%5===0){if(rank('prune'))trimSnake();if(rank('aegis'))shield=true;pendingDraft=true;}
+    if(eaten%5===0&&rank('prune'))trimSnake();
+    if(eaten%8===0&&rank('aegis'))shield=true;
     food=createFood(); updateHUD(); if (!food) finish(true);
   } else snake.pop();
   if (bonus && head.x === bonus.x && head.y === bonus.y) {
-    award((75+50*rank('fortune'))*(dashUntil>playTime?2:1)); bonus=null;
+    award((75+50*rank('fortune')+(route.id==='treasure'?50:0))*(dashUntil>playTime?2:1)); bonus=null;
     burst((head.x+.5)*tile,(head.y+.5)*tile,'#ffd56a',65);notify('★ 黄金能量！奖励 +75');beep(1500,.2);
   }
   if (pickup && head.x === pickup.x && head.y === pickup.y) {
@@ -264,7 +278,7 @@ function step() {
     burst((head.x+.5)*tile,(head.y+.5)*tile,'#69d9ff',45);pickup=null;beep(750,.2);
   }
   updateHUD(); updateAdventureHUD();
-  if(pendingDraft&&state==='playing'){pendingDraft=false;openDraft();}
+  if(sector<5&&sectorMeals>=sectors[sector].goal&&state==='playing')completeSector();
 }
 function setDirection(x,y) {
   if (state !== 'playing' || queue.length>=2) return;
@@ -300,6 +314,7 @@ function draw(time,dt) {
     ctx.strokeStyle=shield?'#69d9ff':'#c1ff65';ctx.shadowColor=ctx.strokeStyle;ctx.shadowBlur=20;ctx.lineWidth=3;
     ctx.beginPath();ctx.arc((snake[0].x+.5)*tile,(snake[0].y+.5)*tile,23,0,Math.PI*2);ctx.stroke();ctx.shadowBlur=0;
   }
+  drawExpedition();
   snake.forEach((part,i)=>{const x=part.x*tile,y=part.y*tile;ctx.shadowColor='#baff61';ctx.shadowBlur=i===0?23:12;
     roundRect(x+2,y+2,tile-4,tile-4,7,i===0?'#dcff9c':`hsl(${85+i*1.8} 85% ${Math.max(32,67-i*1.1)}%)`);
     ctx.shadowBlur=0;if(i===0){const dx=direction.x,dy=direction.y;ctx.fillStyle='#263a21';for(const side of [-1,1]){ctx.beginPath();ctx.arc(x+tile/2+dx*6+(dy?side*5:0),y+tile/2+dy*6+(dx?side*5:0),2,0,Math.PI*2);ctx.fill();}}
@@ -312,12 +327,12 @@ function draw(time,dt) {
 function frame(time) {
   const dt=Math.min(time-lastTime,100);lastTime=time;
   if(state==='playing'){
-    playTime+=dt;
+    playTime+=dt;advanceExpedition(dt);
     if(bonus&&bonus.expires<=playTime)bonus=null;
     if(pickup&&pickup.expires<=playTime)pickup=null;
     if(combo>1&&playTime-lastMeal>=3200+1500*rank('combo')){combo=1;updateHUD();}
     updateAdventureHUD();
-    accumulator+=dt;const tick=Math.max(32,(presets[mode]-Math.floor(eaten/5)*7)*Math.pow(.92,rank('greed'))*Math.pow(1.1,rank('stasis'))*(dashUntil>playTime?.55:1)*(slowUntil>playTime?1.6:1));while(accumulator>=tick&&state==='playing'){step();accumulator-=tick;}}
+    accumulator+=dt;const tick=Math.max(32,(presets[mode]-Math.floor(eaten/5)*7)*route.speed*Math.pow(.92,rank('greed'))*Math.pow(1.1,rank('stasis'))*(dashUntil>playTime?.55:1)*(slowUntil>playTime?1.6:1));while(accumulator>=tick&&state==='playing'){accumulator-=tick;step();}}
   draw(time,dt);requestAnimationFrame(frame);
 }
 const directions={arrowup:[0,-1],w:[0,-1],arrowdown:[0,1],s:[0,1],arrowleft:[-1,0],a:[-1,0],arrowright:[1,0],d:[1,0]};
@@ -325,6 +340,7 @@ document.addEventListener('keydown',e=>{
   if(e.target.closest('button,a,input,select,textarea')&&(e.key==='Enter'||e.key===' '))return;
   const key=e.key.toLowerCase();
   if(state==='draft'){if(['1','2','3'].includes(key)){e.preventDefault();chooseRelic(Number(key)-1);}return;}
+  if(state==='route'){if(['1','2','3'].includes(key)){e.preventDefault();chooseRoute(Number(key)-1);}return;}
   if(state==='base')return;
   if(directions[key]){e.preventDefault();setDirection(...directions[key]);}
   if((key===' '||key==='enter')&&!e.repeat){e.preventDefault();startOrPause();}
@@ -334,12 +350,14 @@ document.addEventListener('keydown',e=>{
 $('baseBtn').onclick=openBase;
 $('closeRogue').onclick=closeBase;
 $('rogueDialog').addEventListener('cancel',e=>{e.preventDefault();if(state==='base')closeBase();});
+$('mobileDash').onclick=()=>{activateDash();$('mobileDash').blur();};
 $('dashBtn').onclick=()=>{activateDash();$('dashBtn').blur();};
 $('startBtn').onclick=()=>{startOrPause();$('startBtn').blur();};
 $('pauseBtn').onclick=()=>{startOrPause();$('pauseBtn').blur();};
 $('restartBtn').onclick=()=>{resetGame();$('restartBtn').blur();};
 $('soundBtn').onclick=()=>{sound=!sound;$('soundBtn').textContent=sound?'♪ ON':'♪ OFF';$('soundBtn').setAttribute('aria-pressed',String(sound));$('soundBtn').setAttribute('aria-label',sound?'关闭音效':'开启音效');beep(660);};
 document.querySelectorAll('[data-mode]').forEach(button=>{button.setAttribute('aria-pressed',String(button.dataset.mode===mode));button.onclick=()=>{
+  if(!settled&&(eaten>0||playTime>0))bankRun();
   mode=button.dataset.mode;document.querySelectorAll('[data-mode]').forEach(b=>{b.classList.toggle('active',b===button);b.setAttribute('aria-pressed',String(b===button));});
   $('modeLabel').textContent=mode.toUpperCase()+' MODE';$('modeDescription').textContent={chill:'慢下来，享受每一道霓虹光芒。',classic:'恰到好处的速度，找回街机的心跳。',hyper:'心跳加速。留给反应的时间不多了。'}[mode];resetGame();button.blur();
 };});
