@@ -6,6 +6,9 @@ const presets = { chill: 165, classic: 120, hyper: 78 };
 const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
 let mode = 'classic', state = 'ready', snake, direction, queue, food, score, eaten, combo, lastMeal;
 let particles = [], ripples = [], shake = 0, lastTime = 0, accumulator = 0, sound = false, audio;
+let playTime = 0, bonus = null, pickup = null, shield = false, slowUntil = 0;
+let dashUntil = 0, dashReady = 0, mission = 0, missionMeals = 0;
+const missions = [3, 5, 7, 9];
 let best = 0;
 try { best = Number(localStorage.getItem('neon-snake-best')) || 0; } catch {}
 const stars = Array.from({ length: 45 }, () => ({ x: Math.random() * size, y: Math.random() * size, phase: Math.random() * 7 }));
@@ -25,8 +28,47 @@ function beep(freq, duration = .09, type = 'sine') {
 function createFood() {
   const free = [];
   for (let y = 0; y < cells; y++) for (let x = 0; x < cells; x++)
-    if (!snake.some(p => p.x === x && p.y === y)) free.push({ x, y });
+    if (!snake.some(p => p.x === x && p.y === y) && ![bonus, pickup].some(p => p && p.x === x && p.y === y)) free.push({ x, y });
+  if (!free.length && snake.length < cells * cells) { bonus = null; pickup = null; return createFood(); }
   return free.length ? free[Math.floor(Math.random() * free.length)] : null;
+}
+function notify(message) {
+  $('comboToast').textContent = message;
+  $('comboToast').classList.add('show');
+  clearTimeout(step.toastTimer);
+  step.toastTimer = setTimeout(() => $('comboToast').classList.remove('show'), 1400);
+}
+function award(points) {
+  score += points;
+  if (score > best) {
+    best = score;
+    try { localStorage.setItem('neon-snake-best', String(best)); } catch {}
+  }
+}
+function spawnSpecial(type) {
+  const candidates = [];
+  for (let y = 0; y < cells; y++) for (let x = 0; x < cells; x++) {
+    if (!snake.some(p => p.x === x && p.y === y) &&
+      ![food, bonus, pickup].some(p => p && p.x === x && p.y === y)) candidates.push({x, y});
+  }
+  const spot = candidates[Math.floor(Math.random() * candidates.length)];
+  return spot ? {...spot, type, expires: playTime + (type === 'gold' ? 6500 : 10000)} : null;
+}
+function activateDash() {
+  if (state !== 'playing' || playTime < dashReady) return;
+  dashUntil = playTime + 1600;
+  dashReady = playTime + 6500;
+  burst((snake[0].x + .5) * tile, (snake[0].y + .5) * tile, '#4de3db');
+  notify('ϟ 冲刺！得分翻倍'); beep(950, .18);
+}
+function updateAdventureHUD() {
+  const target = missions[Math.min(mission, missions.length - 1)];
+  $('missionText').textContent = `任务 ${mission + 1} · 吞噬 ${target} 个能量`;
+  $('missionCount').textContent = `${missionMeals} / ${target}`;
+  $('effectStatus').textContent = shield ? '◈ 护盾已就绪 · 抵挡一次碰撞' : slowUntil > playTime ? `❄ 时间减速 ${Math.ceil((slowUntil - playTime) / 1000)}s` : bonus ? `★ 黄金能量 ${Math.ceil((bonus.expires - playTime) / 1000)}s` : '每 3 次吞噬，触发限时黄金能量';
+  const cooldown = Math.max(0, Math.ceil((dashReady - playTime) / 1000));
+  $('dashBtn').disabled = state !== 'playing' || cooldown > 0;
+  $('dashBtn').textContent = dashUntil > playTime ? 'ϟ 冲刺中 · 双倍得分' : cooldown ? `ϟ 冲刺充能 ${cooldown}s` : 'ϟ 冲刺 / SHIFT';
 }
 function updateHUD() {
   $('score').textContent = pad(score); $('best').textContent = pad(best);
@@ -42,7 +84,7 @@ function updateOverlay() {
   $('arenaStatus').textContent = ({ ready: 'AWAITING PLAYER', playing: 'SIGNAL ACTIVE', paused: 'SIGNAL PAUSED', over: 'SIGNAL LOST', won: 'MISSION COMPLETE' })[state];
   if (active) return;
   const content = {
-    ready: ['READY WHEN YOU ARE', '进入霓虹世界', '每一次转向，都是新的可能。', '开始游戏'],
+    ready: ['READY WHEN YOU ARE', '进入霓虹世界', '抢黄金、开冲刺、拿护盾。完成任务，突破纪录。', '开始游戏'],
     paused: ['TAKE A BREATHER', '时间为你暂停', '下一次突破，从这里继续。', '继续游戏'],
     over: ['SIGNAL LOST / TRY AGAIN', '信号中断', `本局获得 ${score} 分 · 再来一次，超越自己。`, '再来一局'],
     won: ['MISSION COMPLETE', '你征服了霓虹', `全屏制霸！最终得分 ${score}。`, '重新挑战']
@@ -54,6 +96,7 @@ function resetGame() {
   snake = [{x:10,y:12},{x:9,y:12},{x:8,y:12},{x:7,y:12}];
   direction = {x:1,y:0}; queue = []; score = 0; eaten = 0; combo = 1; lastMeal = -Infinity;
   particles = []; ripples = []; shake = 0; accumulator = 0; state = 'ready'; food = createFood();
+  playTime = 0; bonus = null; pickup = null; shield = false; slowUntil = 0; dashUntil = 0; dashReady = 0; mission = 0; missionMeals = 0; updateAdventureHUD();
   $('comboToast').classList.remove('show'); updateHUD(); updateOverlay();
 }
 function startOrPause() {
@@ -78,22 +121,45 @@ function finish(won = false) {
 function step() {
   if (state !== 'playing') return;
   if (queue.length) direction = queue.shift();
-  const head = {x:snake[0].x+direction.x,y:snake[0].y+direction.y};
+  let head = {x:snake[0].x+direction.x,y:snake[0].y+direction.y};
+  const outside = head.x<0 || head.y<0 || head.x>=cells || head.y>=cells;
+  if (outside && shield) {
+    head = {x:(head.x+cells)%cells,y:(head.y+cells)%cells}; shield=false;
+    notify('◈ 护盾破裂 · 穿墙脱险'); beep(280,.2);
+  }
   const eating = food && head.x===food.x && head.y===food.y;
   const body = eating ? snake : snake.slice(0,-1);
-  if (head.x<0 || head.y<0 || head.x>=cells || head.y>=cells || body.some(p=>p.x===head.x&&p.y===head.y)) { finish(); return; }
+  if (head.x<0 || head.y<0 || head.x>=cells || head.y>=cells) { finish(); return; }
+  if (body.some(p=>p.x===head.x&&p.y===head.y)) {
+    if (!shield) { finish(); return; }
+    shield=false; snake=snake.slice(0,2); notify('◈ 护盾破裂 · 舍尾求生');
+  }
   snake.unshift(head);
   if (eating) {
-    const now = performance.now(); combo = now-lastMeal<3200 ? Math.min(combo+1,5) : 1; lastMeal=now;
-    score += 10*combo; eaten++;
-    if (score>best) { best=score; try { localStorage.setItem('neon-snake-best',String(best)); } catch {} }
+    const now = playTime; combo = now-lastMeal<3200 ? Math.min(combo+1,5) : 1; lastMeal=now;
+    award(10*combo*(dashUntil>playTime?2:1)); eaten++; missionMeals++;
     burst((head.x+.5)*tile,(head.y+.5)*tile,'#ff8cbb',40); shake = reducedMotion ? 0 : 4;
     beep(500+combo*120,.14,'triangle');
-    $('comboToast').textContent = combo>1 ? `COMBO ×${combo} / +${10*combo}` : '+10 ENERGY';
-    $('comboToast').classList.add('show'); clearTimeout(step.toastTimer);
-    step.toastTimer=setTimeout(()=>$('comboToast').classList.remove('show'),1000);
+    notify(combo > 1 ? `COMBO ×${combo} / +${10*combo*(dashUntil>playTime?2:1)}` : '+10 ENERGY');
+    if (eaten % 3 === 0) bonus = spawnSpecial('gold');
+    if (eaten % 4 === 0) pickup = spawnSpecial(Math.random() < .5 ? 'shield' : 'slow');
+    const target = missions[Math.min(mission, missions.length - 1)];
+    if (missionMeals >= target) {
+      award(100 + mission * 50); mission++; missionMeals = 0; shield = true;
+      notify('任务完成！奖励积分 + 护盾'); burst(360,360,'#c1ff65',80); beep(1200,.3);
+    }
     food=createFood(); updateHUD(); if (!food) finish(true);
   } else snake.pop();
+  if (bonus && head.x === bonus.x && head.y === bonus.y) {
+    award(75*(dashUntil>playTime?2:1)); bonus=null;
+    burst((head.x+.5)*tile,(head.y+.5)*tile,'#ffd56a',65);notify('★ 黄金能量！奖励 +75');beep(1500,.2);
+  }
+  if (pickup && head.x === pickup.x && head.y === pickup.y) {
+    if(pickup.type==='shield'){shield=true;notify('◈ 护盾上线 · 放手一搏');}
+    else {slowUntil=playTime+7000;notify('❄ 时间减速 · 持续 7 秒');}
+    burst((head.x+.5)*tile,(head.y+.5)*tile,'#69d9ff',45);pickup=null;beep(750,.2);
+  }
+  updateHUD(); updateAdventureHUD();
 }
 function setDirection(x,y) {
   if (state !== 'playing' || queue.length>=2) return;
@@ -115,6 +181,20 @@ function draw(time,dt) {
     const glow=ctx.createRadialGradient(x,y,1,x,y,48);glow.addColorStop(0,'#ff7bb338');glow.addColorStop(1,'#ff7bb300');ctx.fillStyle=glow;ctx.fillRect(x-48,y-48,96,96);
     ctx.save();ctx.translate(x,y);ctx.rotate(Math.PI/4);ctx.shadowColor='#ff80b5';ctx.shadowBlur=22;roundRect(-7*pulse,-7*pulse,14*pulse,14*pulse,3,'#ffa2c9');ctx.restore();
     ctx.strokeStyle='#ff8cbb45';ctx.beginPath();ctx.arc(x,y,19+Math.sin(time*.003)*3,0,Math.PI*2);ctx.stroke();}
+  for (const item of [bonus,pickup]) {
+    if(!item)continue;
+    const x=(item.x+.5)*tile,y=(item.y+.5)*tile;
+    const color=item.type==='gold'?'#ffd56a':'#69d9ff';
+    ctx.save();ctx.shadowColor=color;ctx.shadowBlur=25;ctx.fillStyle=color;
+    ctx.font='bold 25px monospace';ctx.textAlign='center';ctx.textBaseline='middle';
+    ctx.fillText(item.type==='gold'?'★':item.type==='shield'?'◈':'❄',x,y);
+    ctx.strokeStyle=color;ctx.lineWidth=2;ctx.beginPath();
+    ctx.arc(x,y,22,-Math.PI/2,-Math.PI/2+Math.PI*2*Math.max(0,(item.expires-playTime)/(item.type==='gold'?6500:10000)));ctx.stroke();ctx.restore();
+  }
+  if (shield || dashUntil>playTime) {
+    ctx.strokeStyle=shield?'#69d9ff':'#c1ff65';ctx.shadowColor=ctx.strokeStyle;ctx.shadowBlur=20;ctx.lineWidth=3;
+    ctx.beginPath();ctx.arc((snake[0].x+.5)*tile,(snake[0].y+.5)*tile,23,0,Math.PI*2);ctx.stroke();ctx.shadowBlur=0;
+  }
   snake.forEach((part,i)=>{const x=part.x*tile,y=part.y*tile;ctx.shadowColor='#baff61';ctx.shadowBlur=i===0?23:12;
     roundRect(x+2,y+2,tile-4,tile-4,7,i===0?'#dcff9c':`hsl(${85+i*1.8} 85% ${Math.max(32,67-i*1.1)}%)`);
     ctx.shadowBlur=0;if(i===0){const dx=direction.x,dy=direction.y;ctx.fillStyle='#263a21';for(const side of [-1,1]){ctx.beginPath();ctx.arc(x+tile/2+dx*6+(dy?side*5:0),y+tile/2+dy*6+(dx?side*5:0),2,0,Math.PI*2);ctx.fill();}}
@@ -126,7 +206,13 @@ function draw(time,dt) {
 }
 function frame(time) {
   const dt=Math.min(time-lastTime,100);lastTime=time;
-  if(state==='playing'){accumulator+=dt;const tick=Math.max(48,presets[mode]-Math.floor(eaten/5)*7);while(accumulator>=tick&&state==='playing'){step();accumulator-=tick;}}
+  if(state==='playing'){
+    playTime+=dt;
+    if(bonus&&bonus.expires<=playTime)bonus=null;
+    if(pickup&&pickup.expires<=playTime)pickup=null;
+    if(combo>1&&playTime-lastMeal>=3200){combo=1;updateHUD();}
+    updateAdventureHUD();
+    accumulator+=dt;const tick=Math.max(32,(presets[mode]-Math.floor(eaten/5)*7)*(dashUntil>playTime?.55:1)*(slowUntil>playTime?1.6:1));while(accumulator>=tick&&state==='playing'){step();accumulator-=tick;}}
   draw(time,dt);requestAnimationFrame(frame);
 }
 const directions={arrowup:[0,-1],w:[0,-1],arrowdown:[0,1],s:[0,1],arrowleft:[-1,0],a:[-1,0],arrowright:[1,0],d:[1,0]};
@@ -135,8 +221,10 @@ document.addEventListener('keydown',e=>{
   const key=e.key.toLowerCase();
   if(directions[key]){e.preventDefault();setDirection(...directions[key]);}
   if((key===' '||key==='enter')&&!e.repeat){e.preventDefault();startOrPause();}
+  if(key==='shift'&&!e.repeat){e.preventDefault();activateDash();}
   if(key==='r'&&!e.repeat)resetGame();
 });
+$('dashBtn').onclick=()=>{activateDash();$('dashBtn').blur();};
 $('startBtn').onclick=()=>{startOrPause();$('startBtn').blur();};
 $('pauseBtn').onclick=()=>{startOrPause();$('pauseBtn').blur();};
 $('restartBtn').onclick=()=>{resetGame();$('restartBtn').blur();};
